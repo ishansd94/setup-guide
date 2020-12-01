@@ -2,10 +2,11 @@
 
 cp -r ~/bin .
 
-ls -l /usr/local/bin > ./packages/usr_local_bin.txt
+ls -l /usr/local/bin | egrep -iv "Cellar|Applications"  > ./packages/usr_local_bin.txt
 brew list -1 > ./packages/brew_list.txt
 brew list --casks -1 > ./packages/brew-cask_list.txt
-ls -l /usr/local/bin | egrep -iv "Cellar|Applications" > ./packages/system_apps_list.txt
+ls -1 /Applications > ./packages/system_apps_list.txt
+pip3 list > ./packages/pip_list.txt
 
 #Check git status
 git_status="$(git status | grep -i "add\|modified\|new")"
