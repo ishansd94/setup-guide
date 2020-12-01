@@ -1,0 +1,1394 @@
+#!/usr/bin/env python
+
+import argparse
+import ast
+import base64
+import boto3
+import datetime
+import getpass
+import json
+import keyring
+import os
+import re
+import requests
+import sys
+import tempfile
+import time
+import urllib
+import webbrowser
+
+from botocore.exceptions import ClientError
+from bs4 import BeautifulSoup
+
+
+def parse_args():
+
+    parser = argparse.ArgumentParser(
+        description="assume-role",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument(
+        "--account",
+        type=str,
+        help="the name of the account to switch to"
+    )
+
+    parser.add_argument(
+        "--role",
+        type=str,
+        help="the name of the role to switch to"
+    )
+
+    parser.add_argument(
+        "--peroot-user",
+        type=str,
+        help="your PEROOT user name",
+        default=None
+    )
+
+    parser.add_argument(
+        "--accounts-file",
+        default="%s/.aws/accounts" % os.path.expanduser("~"),
+        type=str,
+        help="the path to your aws accounts list"
+    )
+
+    parser.add_argument(
+        "--duration",
+        default=43200,
+        type=int,
+        help="duration in seconds to use when assuming role"
+    )
+
+    parser.add_argument(
+        "--skip-without-mfa",
+        action='store_true',
+        help="if set, skip AssumeRole without MFA"
+    )
+
+    parser.add_argument(
+        "--console",
+        action='store_true',
+        help="open a browser window with the AWS console loaded"
+    )
+
+    parser.add_argument(
+        "--type",
+        default='aws',
+        type=str,
+        help="whether to use plain AWS or SAML"
+    )
+
+    parser.add_argument(
+        "--debug",
+        action='store_true',
+        help="output debug to stderr"
+    )
+
+    args = parser.parse_args()
+
+    return args
+
+
+def debug(function,
+          message):
+
+    global DEBUG
+
+    if DEBUG:
+
+        now = datetime.datetime.now()
+
+        sys.stderr.write(
+            "%s assume-role: [%s] %s\n" % (
+                now.isoformat(),
+                function,
+                message
+            )
+        )
+
+
+def generate_console_url():
+
+    url_credentials = {}
+
+    url_credentials['sessionId'] = os.environ['AWS_ACCESS_KEY_ID']
+    url_credentials['sessionKey'] = os.environ['AWS_SECRET_ACCESS_KEY']
+    url_credentials['sessionToken'] = os.environ['AWS_SESSION_TOKEN']
+
+    json_string_with_temp_credentials = json.dumps(url_credentials)
+
+    request_params = "?Action=getSigninToken&SessionDuration=43200"
+
+    if sys.version_info[0] < 3:
+        def quote_plus_function(s):
+            return urllib.quote_plus(s)
+    else:
+        def quote_plus_function(s):
+            return urllib.parse.quote_plus(s)
+
+    request_params += "&Session=" + quote_plus_function(
+        json_string_with_temp_credentials
+    )
+    request_url = "https://signin.aws.amazon.com/federation" + request_params
+
+    r = requests.get(request_url)
+    signin_token = json.loads(r.text)
+
+    request_params = "?Action=login"
+    request_params += "&Issuer=Example.org"
+    request_params += "&Destination=" + quote_plus_function(
+        "https://console.aws.amazon.com/"
+    )
+    request_params += "&SigninToken=" + signin_token["SigninToken"]
+    request_url = "https://signin.aws.amazon.com/federation" + request_params
+
+    return request_url
+
+
+def obfuscate(string):
+
+    return string[:5] + '***'
+
+
+def merge_two_dicts(
+        primary,
+        secondary):
+
+    z = secondary.copy()
+    z.update(primary)
+    return z
+
+
+def unset_existing_env():
+
+    # Clear out existing AWS environment variables for a fresh start.
+
+    debug(
+        "unset_existing_env",
+        "Removing existing AWS environment variables"
+    )
+
+    env_vars = ["AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN"]
+
+    for env_var in env_vars:
+
+        debug(
+            "unset_existing_env",
+            "Looking to remove environment variable %s" % (
+                env_var
+            )
+        )
+
+        if env_var in os.environ:
+            del os.environ[env_var]
+
+
+def load_config_for_account(
+        account_alias,
+        accounts_file):
+
+    # The configuration file can be in two formats, simple or extended.
+    #
+    # Simple looks like:
+    #
+    # {
+    #   "my-account": "123456789"
+    # }
+    #
+    # Extended looks like:
+    #
+    # {
+    #   "type": "extended",
+    #   "my-normal-aws-account": {
+    #       "account_id": "123456789",
+    #       "type": "aws"
+    #   },
+    #   "my-saml-account": {
+    #       "account_id": "602604727914",
+    #       "type": "pearson-saml"
+    #   }
+    # }
+    #
+    # The purpose of the extended configuration format is to support SAML.
+
+    with open(accounts_file) as json_file:
+
+        try:
+            data = json.load(json_file)
+
+        except ValueError as e:
+            sys.stderr.write(
+                "error parsing JSON in %s\n" % (accounts_file)
+            )
+            sys.exit(1)
+
+    if 'type' in data and data['type'] == 'extended':
+
+        # Configuration file is in "extended" format.
+
+        debug(
+            "load_config_for_account",
+            "Configuration file is in extended format"
+        )
+
+        if account_alias in data:
+
+            return data[account_alias]
+
+        else:
+
+            sys.stderr.write(
+                "can't find account %s in %s\n" %
+                (
+                    account_alias,
+                    accounts_file
+                )
+            )
+
+            sys.exit(1)
+
+    else:
+
+        # Configuration file is in "simple" format.
+
+        debug(
+            "load_config_for_account",
+            "Configuration file is in simple format"
+        )
+
+        if account_alias in data:
+
+            account_id = data[account_alias]
+
+        else:
+
+            sys.stderr.write(
+                "can't find account %s in %s\n" %
+                (
+                    account_alias,
+                    accounts_file
+                )
+            )
+
+            sys.exit(1)
+
+        # Convert the simple format into extended format  and return it
+
+        account_data = {
+            "account_id": account_id,
+            "type": "aws"
+        }
+
+        return account_data
+
+
+def get_credentials_from_sts_response(resp):
+
+    credentials = {
+        "AWS_ACCESS_KEY_ID": resp['Credentials']['AccessKeyId'],
+        "AWS_SECRET_ACCESS_KEY": resp['Credentials']['SecretAccessKey'],
+        "AWS_SESSION_TOKEN": resp['Credentials']['SessionToken']
+    }
+
+    debug(
+        "assume_role",
+        "Got AWS_ACCESS_KEY_ID %s (string length %d)" % (
+            obfuscate(credentials["AWS_ACCESS_KEY_ID"]),
+            len(credentials["AWS_ACCESS_KEY_ID"])
+        )
+    )
+
+    debug(
+        "assume_role",
+        "Got AWS_SECRET_ACCESS_KEY %s (string length %d)" % (
+            obfuscate(credentials["AWS_SECRET_ACCESS_KEY"]),
+            len(credentials["AWS_SECRET_ACCESS_KEY"])
+        )
+    )
+
+    debug(
+        "assume_role",
+        "Got AWS_SESSION_TOKEN %s (string length %d)" % (
+            obfuscate(credentials["AWS_SESSION_TOKEN"]),
+            len(credentials["AWS_SESSION_TOKEN"])
+        )
+    )
+
+    return credentials
+
+
+def assume_role(
+        sts,
+        role_arn,
+        role_session_name,
+        duration,
+        mfa_serial=None,
+        mfa_token=None):
+
+    # AssumeRole can be called both with and without MFA.
+
+    if mfa_serial and mfa_token:
+
+        debug(
+            "assume_role",
+            "Calling sts.AssumeRole with MFA"
+        )
+
+        debug(
+            "assume_role",
+            "RoleArn=%s" % (
+                role_arn
+            )
+        )
+
+        debug(
+            "assume_role",
+            "RoleSessionName=%s" % (
+                role_session_name
+            )
+        )
+
+        debug(
+            "assume_role",
+            "DurationSeconds=%s" % (
+                duration
+            )
+        )
+
+        debug(
+            "assume_role",
+            "SerialNumber=%s" % (
+                mfa_serial
+            )
+        )
+
+        debug(
+            "assume_role",
+            "TokenCode=%s" % (
+                mfa_token
+            )
+        )
+
+        try:
+
+            resp = sts.assume_role(
+                RoleArn=role_arn,
+                RoleSessionName=role_session_name,
+                DurationSeconds=duration,
+                SerialNumber=mfa_serial,
+                TokenCode=mfa_token
+            )
+
+        except ClientError as e:
+
+            if e.response['Error']['Code'] == 'AccessDenied':
+
+                debug(
+                    "assume_role",
+                    "Got AccessDenied when calling AssumeRole with MFA"
+                )
+
+            return None
+
+    else:
+
+        debug(
+            "assume_role",
+            "Calling sts.AssumeRole without MFA"
+        )
+
+        debug(
+            "assume_role",
+            "RoleArn=%s" % (
+                role_arn
+            )
+        )
+
+        debug(
+            "assume_role",
+            "RoleSessionName=%s" % (
+                role_session_name
+            )
+        )
+
+        debug(
+            "assume_role",
+            "DurationSeconds=%s" % (
+                duration
+            )
+        )
+
+        try:
+
+            resp = sts.assume_role(
+                RoleArn=role_arn,
+                RoleSessionName=role_session_name,
+                DurationSeconds=duration
+            )
+
+        except ClientError as e:
+
+            if e.response['Error']['Code'] == 'AccessDenied':
+
+                debug(
+                    "assume_role",
+                    "Got AccessDenied when calling AssumeRole without MFA"
+                )
+
+            return None
+
+    # Extract the temporary access key from the response and return it as
+    # an appropriate set of enviornment variables.
+
+    credentials = get_credentials_from_sts_response(resp)
+
+    return credentials
+
+
+def assume_role_with_saml(
+        sts,
+        role_arn,
+        principal_arn,
+        saml_assertion,
+        duration):
+
+    debug(
+        "assume_role_with_saml",
+        "Calling sts.AssumeRoleWithSAML"
+    )
+
+    debug(
+        "assume_role_with_saml",
+        "RoleArn=%s" % (
+            role_arn
+        )
+    )
+
+    debug(
+        "assume_role_with_saml",
+        "PrincipalArn=%s" % (
+            principal_arn
+        )
+    )
+
+    debug(
+        "assume_role_with_saml",
+        "DurationSeconds=%s" % (
+            duration
+        )
+    )
+
+    try:
+
+        resp = sts.assume_role_with_saml(
+            RoleArn=role_arn,
+            PrincipalArn=principal_arn,
+            SAMLAssertion=saml_assertion,
+            DurationSeconds=duration,
+        )
+
+    except ClientError as e:
+
+        if e.response['Error']['Code'] == 'InvalidIdentityToken':
+
+            sys.stderr.write(
+                "SAML assertion does not allow you to assume that role\n"
+            )
+            sys.exit(1)
+
+        else:
+
+            sys.stderr.write(
+                "Caught unknown SAML exception - %s\n" % (
+                    e.response['Error']['Message']
+                )
+            )
+            sys.exit(1)
+
+    # Extract the temporary access key from the response and return it as
+    # an appropriate set of enviornment variables.
+
+    credentials = get_credentials_from_sts_response(resp)
+
+    return credentials
+
+
+def test_credentials(credentials):
+
+    # Test a set of AWS credentials.
+
+    debug(
+        "test_credentials",
+        "Testing AWS credentials"
+    )
+
+    # If the supplied credentials are empty, fail.
+
+    if credentials == None:
+        debug(
+            "test_credentials",
+            "Credentials supplied were empty, failing the test"
+        )
+        return False
+
+    # If the supplied credentials are incomplete, fail.
+
+    if (
+        "AWS_ACCESS_KEY_ID" not in credentials or
+        "AWS_SECRET_ACCESS_KEY" not in credentials or
+        "AWS_SESSION_TOKEN" not in credentials
+    ):
+        debug(
+            "test_credentials",
+            "Credentials supplied were incomplete, failing the test"
+        )
+        return False
+
+    # If the supplied credentials are complete but don't actually work, fail.
+
+    try:
+
+        debug(
+            "test_credentials",
+            "Found a complete set of AWS credentials, running a test"
+        )
+
+        debug(
+            "test_credentials",
+            "Testing AWS_ACCESS_KEY_ID %s (string length %d)" % (
+                obfuscate(credentials["AWS_ACCESS_KEY_ID"]),
+                len(credentials["AWS_ACCESS_KEY_ID"])
+            )
+        )
+
+        debug(
+            "test_credentials",
+            "Testing AWS_SECRET_ACCESS_KEY %s (string length %d)" % (
+                obfuscate(credentials["AWS_SECRET_ACCESS_KEY"]),
+                len(credentials["AWS_SECRET_ACCESS_KEY"])
+            )
+        )
+
+        debug(
+            "test_credentials",
+            "Testing AWS_SESSION_TOKEN %s (string length %d)" % (
+                obfuscate(credentials["AWS_SESSION_TOKEN"]),
+                len(credentials["AWS_SESSION_TOKEN"])
+            )
+        )
+
+        sts = boto3.client(
+            'sts',
+            aws_access_key_id=credentials["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=credentials["AWS_SECRET_ACCESS_KEY"],
+            aws_session_token=credentials["AWS_SESSION_TOKEN"]
+        )
+        sts.get_caller_identity()
+
+    except:
+
+        debug(
+            "test_credentials",
+            "Credentials were complete but did not work, failing the test"
+        )
+        return False
+
+    # If we get here, the credentials work, so pass.
+
+    debug(
+        "test_credentials",
+        "Credentials worked, passing the test"
+    )
+    return True
+
+
+def store_credentials_to_cache(
+        account_alias,
+        role,
+        credentials):
+
+    # Store a set of AWS keys, supplied in the for of a Python dict, in the
+    # system's keyring.
+
+    # Base64 encode the JSON string to get an acceptable data structure.
+
+    debug(
+        "store_credentials_to_cache",
+        "Storing cached credentials to keyring for account %s role %s" % (
+            account_alias,
+            role
+        )
+    )
+
+    key = "%s/%s" % (
+        account_alias,
+        role
+    )
+
+    json_str = json.dumps(credentials)
+
+    value = base64.b64encode(
+        json_str.encode("utf-8")
+    )
+
+    keyring.set_password(
+        "assume-role",
+        key,
+        value
+    )
+
+
+def get_credentials_from_cache(
+        account_alias,
+        role):
+
+    # Retrieve a set of AWS credentials from the system's keyring.
+
+    # If an entry is available, base64 decode it and convert the resulting
+    # JSON to a Python dict.
+
+    # If the entry isn't present in the cache, just return None.
+
+    debug(
+        "get_credentials_from_cache",
+        "Attempting to get credentials from cache for account %s role %s" % (
+            account_alias,
+            role
+        )
+    )
+
+    key = "%s/%s" % (
+        account_alias,
+        role
+    )
+
+    cache_entry = keyring.get_password(
+        "assume-role",
+        key
+    )
+
+    if cache_entry:
+
+        debug(
+            "get_credentials_from_cache",
+            "Cache entry exists for account %s role %s" % (
+                account_alias,
+                role
+            )
+        )
+
+        try:
+
+            credentials = json.loads(
+                base64.b64decode(
+                    cache_entry
+                )
+            )
+
+        except:
+
+            debug(
+                "get_credentials_from_cache",
+                "Cache entry for account %s role %s is corrupt" % (
+                    account_alias,
+                    role
+                )
+            )
+
+            return None
+
+        else:
+
+            debug(
+                "get_credentials_from_cache",
+                "Successfully retrieved cached credentials for account %s role %s" % (
+                    account_alias,
+                    role
+                )
+            )
+
+            debug(
+                "get_credentials_from_cache",
+                "Got AWS_ACCESS_KEY_ID %s (string length %d)" % (
+                    obfuscate(credentials["AWS_ACCESS_KEY_ID"]),
+                    len(credentials["AWS_ACCESS_KEY_ID"])
+                )
+            )
+
+            debug(
+                "get_credentials_from_cache",
+                "Got AWS_SECRET_ACCESS_KEY %s (string length %d)" % (
+                    obfuscate(credentials["AWS_SECRET_ACCESS_KEY"]),
+                    len(credentials["AWS_SECRET_ACCESS_KEY"])
+                )
+            )
+
+            debug(
+                "get_credentials_from_cache",
+                "Got AWS_SESSION_TOKEN %s (string length %d)" % (
+                    obfuscate(credentials["AWS_SESSION_TOKEN"]),
+                    len(credentials["AWS_SESSION_TOKEN"])
+                )
+            )
+
+            return credentials
+
+    else:
+
+        return None
+
+
+def get_mfa_token(
+        prompt,
+        empty_is_ok=False):
+
+    sys.stderr.write("%s " % (prompt))
+
+    if sys.version_info[0] < 3:
+        mfa_token = raw_input()
+    else:
+        mfa_token = input()
+
+    if mfa_token == '' and empty_is_ok:
+        return mfa_token
+
+    if re.search('[0-9]{6}', mfa_token):
+        return mfa_token
+
+    sys.stderr.write("invalid MFA token\n")
+    sys.exit(1)
+
+
+def print_shell_export_lines_and_exit(
+        credentials,
+        account_alias):
+
+    debug(
+        "print_shell_export_lines_and_exit",
+        "Printing export lines and terminating execution"
+    )
+
+    # Print the "export FOO=BAR" lines to be consumed by the parent shell's
+    # eval call.
+
+    if sys.version_info[0] < 3:
+        for key, value in credentials.iteritems():
+            print("export %s=%s" % (key, value))
+    else:
+        for key, value in credentials.items():
+            print("export %s=%s" % (key, value))
+
+    print("export ACTIVE_AWS_ACCOUNT=%s" % (account_alias))
+
+    # If we hit this function then a set of functioning AWS keys have been
+    # found and we should exit.
+
+    sys.exit(0)
+
+
+def assume_role_aws(
+        sts,
+        account_id,
+        account_alias,
+        role,
+        duration,
+        skip_without_mfa):
+
+    # Get the name of our IAM user which is used to specify the MFA device
+    # and as an assume-role identifier.
+
+    caller_identity = sts.get_caller_identity()
+    user_name = caller_identity['Arn'].split("/")[1]
+
+    # Construct the arguments required for the assume-role call.
+
+    role_session_name = user_name + '-' + str(int(time.time()))
+    role_arn = "arn:aws:iam::%s:role/%s" % (account_id, role)
+    mfa_serial = "arn:aws:iam::557351424594:mfa/%s" % (user_name)
+    duration = duration
+
+    debug(
+        "assume_role_aws",
+        "user_name is %s" % (
+            user_name
+        )
+    )
+
+    debug(
+        "assume_role_aws",
+        "role_session_name is %s" % (
+            role_session_name
+        )
+    )
+
+    debug(
+        "assume_role_aws",
+        "role_arn is %s" % (
+            role_arn
+        )
+    )
+
+    debug(
+        "assume_role_aws",
+        "mfa_serial is %s" % (
+            mfa_serial
+        )
+    )
+
+    debug(
+        "assume_role_aws",
+        "duration is %s" % (
+            duration
+        )
+    )
+
+    # There are three ways to get a valid set of AWS credentials:
+    #
+    # 1) From the system's keyring (a cached set)
+    # 2) From an assume-role call without MFA
+    # 3) From an assume-role call with MFA
+    #
+    # These are in order of preference, because the retrieval method becomes
+    # more cumbersome as you proceed.
+    #
+    # Try these three mechanisms in order, and for each, test the credentials.
+    #
+    # So:
+    #
+    # If there are cached credentials and they work, use them.
+    #
+    # If there are no cached credentials, try an assume-role without MFA.
+    # If that works, use those credentials.
+    #
+    # If there are no cached credentials, and the assume-role without MFA
+    # didn't work, then promt the user for an MFA token and use that.
+
+    # First, try the cached credentials
+
+    debug(
+        "assume_role_aws",
+        "Trying to retrieve credentials from cache"
+    )
+
+    credentials = get_credentials_from_cache(
+        account_alias,
+        role
+    )
+
+    if test_credentials(credentials):
+
+        debug(
+            "assume_role_aws",
+            "Credentials successfully retrieved from cache"
+        )
+
+        print_shell_export_lines_and_exit(
+            credentials,
+            account_alias
+        )
+
+    # Second, try assume-role without MFA, unless the user has asked us not
+    # to bother
+
+    if skip_without_mfa == False or skip_without_mfa == u'False':
+
+        debug(
+            "assume_role_aws",
+            "Trying to retrieve credentials using AssumeRole without MFA"
+        )
+
+        credentials = assume_role(
+            sts,
+            role_arn,
+            role_session_name,
+            duration
+        )
+
+        if test_credentials(credentials):
+
+            debug(
+                "assume_role_aws",
+                "Credentials successfully retrieved using AssumeRole without MFA"
+            )
+
+            store_credentials_to_cache(
+                account_alias,
+                role,
+                credentials
+            )
+
+            print_shell_export_lines_and_exit(
+                credentials,
+                account_alias
+            )
+
+    else:
+
+        debug(
+            "assume_role_aws",
+            "Not trying AssumeRole without MFA, disabled by command line argument"
+        )
+
+    # Lastly, try assume-role with MFA
+
+    debug(
+        "assume_role_aws",
+        "Trying to retrieve credentials using AssumeRole with MFA"
+    )
+
+    mfa_token = get_mfa_token('Enter MFA token:')
+
+    credentials = assume_role(
+        sts,
+        role_arn,
+        role_session_name,
+        duration,
+        mfa_serial,
+        mfa_token
+    )
+
+    if test_credentials(credentials):
+
+        debug(
+            "assume_role_aws",
+            "Credentials successfully retrieved using AssumeRole with MFA"
+        )
+
+        store_credentials_to_cache(
+            account_alias,
+            role,
+            credentials
+        )
+
+        print_shell_export_lines_and_exit(
+            credentials,
+            account_alias
+        )
+
+    # If none of these succeded, throw an error
+
+    sys.stderr.write("error retrieving credentials\n")
+
+
+def assume_role_pearson_saml(
+        sts,
+        account_id,
+        account_alias,
+        role,
+        duration,
+        peroot_user):
+
+    # Construct the arguments required for the assume-role call.
+
+    role_session_name = peroot_user + '-' + str(int(time.time()))
+    role_arn = "arn:aws:iam::%s:role/%s" % (account_id, role)
+    principal_arn = "arn:aws:iam::%s:saml-provider/myCloudSSO" % (account_id)
+
+    debug(
+        "assume_role_pearson_saml",
+        "peroot_user is %s" % (
+            peroot_user
+        )
+    )
+
+    debug(
+        "assume_role_pearson_saml",
+        "role_session_name is %s" % (
+            role_session_name
+        )
+    )
+
+    debug(
+        "assume_role_pearson_saml",
+        "role_arn is %s" % (
+            role_arn
+        )
+    )
+
+    debug(
+        "assume_role_pearson_saml",
+        "duration is %s" % (
+            duration
+        )
+    )
+
+    # First, try the cached credentials
+
+    debug(
+        "assume_role_pearson_saml",
+        "Trying to retrieve credentials from cache"
+    )
+
+    credentials = get_credentials_from_cache(
+        account_alias,
+        role
+    )
+
+    if test_credentials(credentials):
+
+        debug(
+            "assume_role_pearson_saml",
+            "Credentials successfully retrieved from cache"
+        )
+
+        print_shell_export_lines_and_exit(
+            credentials,
+            account_alias
+        )
+
+    # If that fails, do an AssumeRoleWithSAML
+
+    debug(
+        "assume_role_pearson_saml",
+        "Trying to retrieve credentials using AssumeRoleWithSAML"
+    )
+
+    awsSAMLentryurl = 'https://identity-internal.pearson.com/auth/saml2/jsp/idpSSOInit.jsp?metaAlias=/pearson/saml-idp&spEntityID=urn%3Aamazon%3Awebservices'
+    FRSecurityCodeUrl = 'https://identity-internal.pearson.com/auth/json/pearson/authenticate?authIndexType=service&authIndexValue=mfa_oath_authentication'
+    FRTouchToVerifyUrl = 'https://identity-internal.pearson.com/auth/json/pearson/authenticate?authIndexType=service&authIndexValue=mfa_push_authentication'
+
+    peroot_password = getpass.getpass(prompt='Enter PEROOT password: ')
+
+    mfa_token = get_mfa_token(
+        'Enter MFA token (or leave blank for touch-to-verify):',
+        empty_is_ok=True
+    )
+
+    session = requests.Session()
+
+    if mfa_token == '':
+
+        # Use touch-to-verify
+
+        debug(
+            "assume_role_pearson_saml",
+            "Empty MFA token provided by user, using touch-to-verify"
+        )
+
+        response = session.post(
+            FRTouchToVerifyUrl,
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-OpenAM-Username': peroot_user,
+                'X-OpenAM-Password': peroot_password
+            }
+        )
+
+        debug(
+            "assume_role_pearson_saml",
+            "First request to FRTouchToVerifyUrl gave status code %s" % (
+                response.status_code
+            )
+        )
+
+        if response.status_code != 200:
+            sys.stderr.write("authentication error\n")
+            sys.exit(1)
+
+        jsonresult = json.loads(response.text)
+        payload = response.text.decode('utf8')
+
+        i = 1
+        max_tries = 12
+
+        while "tokenId" not in jsonresult:
+
+            if i > max_tries:
+                sys.stderr.write("timed out waiting for touch-to-verify\n")
+                sys.exit(1)
+
+            time.sleep(5)
+
+            response = session.post(
+                FRTouchToVerifyUrl,
+                data=payload,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            )
+
+            debug(
+                "assume_role_pearson_saml",
+                "Poll %d of %d to FRTouchToVerifyUrl gave status code %s" % (
+                    i,
+                    max_tries,
+                    response.status_code
+                )
+            )
+
+            if response.status_code != 200:
+                sys.stderr.write("authentication error\n")
+                sys.exit(1)
+
+            jsonresult = json.loads(response.text)
+            payload = response.text.decode('utf8')
+
+            i = i + 1
+
+        else:
+
+            debug(
+                "assume_role_pearson_saml",
+                "Got token from FRTouchToVerifyUrl after %d attempt(s)" % (
+                    i-1
+                )
+            )
+
+    else:
+
+        # Use an MFA token
+
+        debug(
+            "assume_role_pearson_saml",
+            "Valid MFA token provided by user, using it"
+        )
+
+        response = session.post(
+            FRSecurityCodeUrl,
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-OpenAM-Username': peroot_user,
+                'X-OpenAM-Password': peroot_password
+            }
+        )
+
+        debug(
+            "assume_role_pearson_saml",
+            "First request to FRSecurityCodeUrl gave status code %s" % (
+                response.status_code
+            )
+        )
+
+        if response.status_code != 200:
+            sys.stderr.write("authentication error\n")
+            sys.exit(1)
+
+        jsonresult = json.loads(response.text)
+
+        jsonresult["callbacks"][0]["input"][0]["value"] = mfa_token
+
+        data = json.dumps(jsonresult)
+
+        response = session.post(
+            FRSecurityCodeUrl,
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            data=data
+        )
+
+        debug(
+            "assume_role_pearson_saml",
+            "Second request to FRSecurityCodeUrl gave status code %s" % (
+                response.status_code
+            )
+        )
+
+        if response.status_code != 200:
+            sys.stderr.write("authentication error\n")
+            sys.exit(1)
+
+        jsonresult = json.loads(response.text)
+
+    # By now, either using touch-to-verify or with an MFA token, we should have
+    # a Pearson SSO token that can be used to authenticate via SAML.
+
+    if 'tokenId' not in jsonresult:
+        sys.stderr.write("authentication error\n")
+        sys.exit(1)
+    else:
+        debug(
+            "assume_role_pearson_saml",
+            "Got Pearson SSO token %s (string length %d)" % (
+                obfuscate(
+                    jsonresult['tokenId']
+                ),
+                len(
+                    jsonresult['tokenId']
+                )
+            )
+        )
+
+    response = session.get(awsSAMLentryurl)
+
+    debug(
+        "assume_role_pearson_saml",
+        "Request to awsSAMLentryurl gave status code %s" % (
+            response.status_code
+        )
+    )
+
+    if response.status_code != 200:
+        sys.stderr.write("authentication error\n")
+        sys.exit(1)
+
+    soup = BeautifulSoup(
+        response.text.decode('utf8'),
+        features="html.parser"
+    )
+
+    # Fnd the SAML assertion in the returned HTML
+
+    saml_assertion = None
+
+    tags = soup.find_all('input')
+    for tag in tags:
+        if(tag.get('name') == 'SAMLResponse'):
+            saml_assertion = tag.get('value')
+
+    if not saml_assertion:
+        sys.stderr.write("failed getting SAMLResponse from awsSAMLentryurl\n")
+        sys.exit(1)
+    else:
+        debug(
+            "assume_role_pearson_saml",
+            "Got SAML assertion %s (string length %d)" % (
+                obfuscate(
+                    saml_assertion
+                ),
+                len(
+                    saml_assertion
+                )
+            )
+        )
+
+    # Call AssumeRoleWithSAML to get a set of AWS credentials
+
+    credentials = assume_role_with_saml(
+        sts,
+        role_arn,
+        principal_arn,
+        saml_assertion,
+        duration
+    )
+
+    if test_credentials(credentials):
+
+        debug(
+            "assume_role_pearson_saml",
+            "Credentials successfully retrieved using AssumeRoleWithSAML"
+        )
+
+        store_credentials_to_cache(
+            account_alias,
+            role,
+            credentials
+        )
+
+        print_shell_export_lines_and_exit(
+            credentials,
+            account_alias
+        )
+
+    # If none of these succeded, throw an error
+
+    sys.stderr.write("error retrieving credentials\n")
+
+
+def main():
+
+    args = parse_args()
+
+    global DEBUG
+
+    if args.debug == True:
+
+        DEBUG = True
+
+        debug(
+            "main",
+            "Debug output is enabled"
+        )
+
+    if args.console:
+
+        # If invoked with the --console argument open a browser using the
+        # existing environment credentials.
+        #
+        # Saves you having to log-in to the web console.
+
+        debug(
+            "main",
+            "Launching a browser window with currently assumed role"
+        )
+
+        console_url = generate_console_url()
+        webbrowser.open_new(console_url)
+        sys.exit(0)
+
+    unset_existing_env()
+
+    if os.getenv('ASSUME_ROLE_PROFILE') is not None:
+        boto3.setup_default_session(
+            profile_name=os.getenv(
+                'ASSUME_ROLE_PROFILE'
+            )
+        )
+
+    sts = boto3.client("sts")
+
+    account_alias = args.account
+
+    config_from_file = load_config_for_account(
+        account_alias,
+        args.accounts_file
+    )
+
+    config_from_command_line = vars(
+        args
+    )
+
+    # Arguments can come from either configuration or from the command line.
+    #
+    # The configuration file takes precedence.
+
+    account_config = merge_two_dicts(
+        config_from_file,
+        config_from_command_line
+    )
+
+    if account_config['type'] == 'aws':
+
+        assume_role_aws(
+            sts,
+            account_config['account_id'],
+            account_alias,
+            account_config['role'],
+            account_config['duration'],
+            account_config['skip_without_mfa']
+        )
+
+    elif account_config['type'] == 'pearson-saml':
+
+        if account_config['peroot_user'] == None:
+            sys.stderr.write(
+                "must set peroot-user to use pearson-saml authentication\n"
+            )
+            sys.exit(1)
+
+        assume_role_pearson_saml(
+            sts,
+            account_config['account_id'],
+            account_alias,
+            account_config['role'],
+            account_config['duration'],
+            account_config['peroot_user']
+        )
+
+    else:
+        sys.stderr.write(
+            "unsupported authentication type\n"
+        )
+
+
+if __name__ == "__main__":
+    DEBUG = False
+    main()

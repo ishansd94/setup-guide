@@ -1,0 +1,76 @@
+#!/bin/sh
+
+context=""
+kubeconfig=""
+generator=""
+node=""
+namespace=""
+while [ $# -gt 0 ]; do
+  key="$1"
+
+  case $key in
+  --context)
+    context="--context $2"
+    shift
+    shift
+    ;;
+  --kubeconfig)
+    kubeconfig="--kubeconfig $2"
+    shift
+    shift
+    ;;
+  -n | --namespace)
+    namespace="--namespace $2"
+    shift
+    shift
+    ;;
+  *)
+    node="$1"
+    shift
+    ;;
+  esac
+done
+
+if [ -z "$node" ]; then
+  echo "Please specify node name"
+  exit 1
+fi
+
+image="docker.io/library/alpine"
+pod="nsenter-$(env LC_ALL=C tr -dc a-z0-9 < /dev/urandom | head -c 6)"
+
+# Check the node
+kubectl get node "$node" $context $kubeconfig >/dev/null || exit 1
+
+overrides="$(
+  cat <<EOT
+{
+  "spec": {
+    "nodeName": "$node",
+    "hostPID": true,
+    "containers": [
+      {
+        "securityContext": {
+          "privileged": true
+        },
+        "image": "$image",
+        "name": "nsenter",
+        "stdin": true,
+        "stdinOnce": true,
+        "tty": true,
+        "command": [ "nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--", "bash", "-l" ]
+      }
+    ]
+  }
+}
+EOT
+)"
+
+# Support Kubectl <1.18
+m=$(kubectl version --client -o yaml | while read k v; do [ "$k" = minor: ] && echo "${v%\"*}"; done)
+if [ "${m#*\"}" -lt 18 ]; then
+  generator="--generator=run-pod/v1"
+fi
+
+echo "spawning \"$pod\" on \"$node\""
+kubectl run --rm --image "$image" --overrides="$overrides" -ti "$pod" $generator $context $kubeconfig $namespace

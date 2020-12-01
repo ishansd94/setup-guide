@@ -1,0 +1,90 @@
+total 618368
+-rwxr-xr-x   1 root     wheel         80 Jun  4 22:37 VBoxAutostart
+-rwxr-xr-x   1 root     wheel         82 Jun  4 22:37 VBoxBalloonCtrl
+-rwxr-xr-x   1 root     wheel         80 Jun  4 22:37 VBoxBugReport
+-rwxr-xr-x   1 root     wheel         77 Jun  4 22:37 VBoxDTrace
+-rwxr-xr-x   1 root     wheel         79 Jun  4 22:37 VBoxHeadless
+-rwxr-xr-x   1 root     wheel         77 Jun  4 22:37 VBoxManage
+-rwxr-xr-x   1 root     wheel         79 Jun  4 22:37 VBoxVRDP
+-rwxr-xr-x   1 root     wheel         77 Jun  4 22:37 VirtualBox
+-rwxr-xr-x   1 root     wheel        115 Jun  4 22:37 VirtualBoxVM
+drwxr-xr-x  15 vdassis  admin        480 Jul 13 10:39 __pycache__
+-rwxr-xr-x   1 vdassis  admin       3482 Jul 10 01:55 activate-global-python-argcomplete
+-rwxr-xr-x   1 vdassis  admin        838 Jul 13 10:39 aws
+-rwxr-xr-x   1 vdassis  admin        230 Oct 16 16:59 aws-shell
+-rwxr-xr-x   1 vdassis  admin        240 Oct 16 16:59 aws-shell-mkindex
+-rwxr-xr-x   1 vdassis  admin       1432 Jul 13 10:39 aws.cmd
+-rwxr-xr-x   1 vdassis  admin        204 Jul 13 10:39 aws_bash_completer
+-rwxr-xr-x   1 vdassis  admin       1159 Jul 13 10:39 aws_completer
+-rwxr-xr-x   1 vdassis  admin       1807 Jul 13 10:39 aws_zsh_completer.sh
+lrwxr-xr-x   1 vdassis  admin         28 Jul  7 15:58 brew -> /usr/local/Homebrew/bin/brew
+-rwxr-xr-x   1 vdassis  admin        244 Jul 10 01:42 chardetect
+-rwxr-xr-x   1 root     admin        582 Jul 17 16:17 coderay
+-rwxr-xr-x   1 root     admin        578 Jul 17 16:17 console
+-rwxr-xr-x   1 root     admin        600 Jul 17 16:17 ffi-yajl-bench
+-rwxr-xr-x   1 vdassis  wheel       4678 Jan  1  1980 gcloud
+-rwxr-xr-x   1 root     admin        632 Jul 17 16:17 generate-api
+-rwxr-xr-x   1 vdassis  admin       1118 Aug 20 12:40 hcltool
+-rwxr-xr-x@  1 vdassis  staff   45171344 Jun 16 23:49 helm2
+lrwxr-xr-x   1 vdassis  admin         34 Jul 10 01:46 how2 -> ../lib/node_modules/how-2/bin/how2
+-rwxr-xr-x   1 vdassis  admin        265 Jul 10 01:42 howdoi
+-rwxr-xr-x   1 root     admin        591 Jul 17 16:17 htmldiff
+-rwxr-xr-x   1 root     admin        600 Jul 17 16:17 httpclient
+-rwxr-xr-x   1 vdassis  admin   11290288 Sep  5 15:20 infracost
+-rwxr-xr-x   1 root     admin        592 Jul 17 16:17 inspec
+-rwxr-xr-x   1 vdassis  admin  106738960 Oct  8 01:41 istioctl
+lrwxr-xr-x   1 root     wheel         24 Jul  7 14:25 jamf -> /usr/local/jamf/bin/jamf
+lrwxr-xr-x   1 root     wheel         29 Jul  7 14:25 jamfAgent -> /usr/local/jamf/bin/jamfAgent
+-rwxr-xr-x   1 vdassis  admin       1718 Jul 13 10:39 jp.py
+-rwxr-xr-x   1 root     admin        585 Jul 17 16:17 ldiff
+-rwxr-xr-x   1 vdassis  staff   71987912 Nov 27 12:00 meshctl
+lrwxr-xr-x   1 vdassis  admin         46 Sep 17 18:32 npm -> /usr/local/lib/node_modules/npm/bin/npm-cli.js
+lrwxr-xr-x   1 vdassis  admin         46 Sep 17 18:32 npx -> /usr/local/lib/node_modules/npm/bin/npx-cli.js
+-rwxr-xr-x   1 root     admin        558 Jul 17 16:17 pry
+-rwxr-xr-x   1 vdassis  admin        238 Jul 10 01:42 pygmentize
+-rwxr-xr-x   1 vdassis  admin        235 Jul 13 10:39 pyrsa-decrypt
+-rwxr-xr-x   1 vdassis  admin        235 Jul 13 10:39 pyrsa-encrypt
+-rwxr-xr-x   1 vdassis  admin        233 Jul 13 10:39 pyrsa-keygen
+-rwxr-xr-x   1 vdassis  admin        256 Jul 13 10:39 pyrsa-priv2pub
+-rwxr-xr-x   1 vdassis  admin        229 Jul 13 10:39 pyrsa-sign
+-rwxr-xr-x   1 vdassis  admin        233 Jul 13 10:39 pyrsa-verify
+-rwxr-xr-x   1 vdassis  admin       2578 Jul 10 01:55 python-argcomplete-check-easy-install-script
+-rwxr-xr-x   1 vdassis  admin        314 Jul 10 01:55 python-argcomplete-tcsh
+lrwxr-xr-x   1 vdassis  admin         52 Sep 23 12:40 readme -> ../lib/node_modules/readme-md-generator/src/index.js
+-rwxr-xr-x   1 vdassis  admin       1764 Jul 10 01:55 register-python-argcomplete
+-rwxr-xr-x   1 root     admin        590 Jul 17 16:17 rspec
+-rwxr-xr-x   1 vdassis  admin        617 Jul 13 10:39 rst2html.py
+-rwxr-xr-x   1 vdassis  admin        737 Jul 13 10:39 rst2html4.py
+-rwxr-xr-x   1 vdassis  admin       1163 Jul 13 10:39 rst2html5.py
+-rwxr-xr-x   1 vdassis  admin        814 Jul 13 10:39 rst2latex.py
+-rwxr-xr-x   1 vdassis  admin        623 Jul 13 10:39 rst2man.py
+-rwxr-xr-x   1 vdassis  admin        787 Jul 13 10:39 rst2odt.py
+-rwxr-xr-x   1 vdassis  admin       1721 Jul 13 10:39 rst2odt_prepstyles.py
+-rwxr-xr-x   1 vdassis  admin        624 Jul 13 10:39 rst2pseudoxml.py
+-rwxr-xr-x   1 vdassis  admin        660 Jul 13 10:39 rst2s5.py
+-rwxr-xr-x   1 vdassis  admin        894 Jul 13 10:39 rst2xetex.py
+-rwxr-xr-x   1 vdassis  admin        625 Jul 13 10:39 rst2xml.py
+-rwxr-xr-x   1 vdassis  admin        693 Jul 13 10:39 rstpep2html.py
+-rwxr-xr-x   1 root     admin        572 Jul 17 16:17 rwinrm
+-rwxr-xr-x   1 root     admin        588 Jul 17 16:17 rwinrmcp
+-rwxr-xr-x   1 vdassis  admin        229 Jul 13 10:39 saws
+-rwxr-xr-x   1 root     admin        574 Jul 17 16:17 setup
+-rwxr-xr-x   1 vdassis  admin        228 Jul  9 21:51 shallow-backup
+-rwxr-xr-x   1 vdassis  admin   29363008 Sep  9 18:57 sops
+-rwxr-xr-x   1 root     admin        616 Jul 17 16:17 term_cdiff
+-rwxr-xr-x   1 root     admin        622 Jul 17 16:17 term_colortab
+-rwxr-xr-x   1 root     admin        620 Jul 17 16:17 term_decolor
+-rwxr-xr-x   1 root     admin        620 Jul 17 16:17 term_display
+-rwxr-xr-x   1 root     admin        618 Jul 17 16:17 term_mandel
+-rwxr-xr-x   1 root     admin        614 Jul 17 16:17 term_snow
+-rwxr-xr-x   1 vdassis  staff   38664032 Nov 27 12:00 terragrunt
+-rwxr-xr-x   1 root     admin        564 Jul 17 16:17 thor
+lrwxr-xr-x   1 vdassis  admin         33 Jul 10 01:48 tldr -> ../lib/node_modules/tldr/bin/tldr
+lrwxr-xr-x   1 root     admin         24 Jul  9 00:12 vagrant -> /opt/vagrant/bin/vagrant
+-rwxr-xr-x   1 root     wheel         75 Jun  4 22:37 vbox-img
+-rwxr-xr-x   1 root     wheel         80 Jun  4 22:37 vboximg-mount
+-rwxr-xr-x   1 root     wheel         77 Jun  4 22:37 vboxwebsrv
+lrwxr-xr-x   1 vdassis  admin         36 Jul 10 01:49 wat -> ../lib/node_modules/wat/bin/index.js
+-rwxr-xr-x   1 vdassis  admin        228 Jul 10 01:55 xq
+-rwxr-xr-x   1 vdassis  admin        232 Sep 17 19:34 youtube-dl
+-rwxr-xr-x   1 vdassis  admin        222 Jul 10 01:55 yq

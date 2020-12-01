@@ -1,0 +1,32 @@
+#!/usr/local/bin/bash
+
+#Get the assume role alias as a string for a env
+
+declare -A aws_accounts
+
+aws_accounts=( 
+	["dev"]="bitesize-nonprod"
+        ["ci"]="pearson-paas-cicd"
+	["int"]="bitesize-prod"
+	["nft"]="bitesize-prod"
+	["stg"]="bitesize-prod"
+	["stage"]="pearson-paas-test"
+	["pre"]="bitesize-prod"
+	["prd"]="pearson-paas-prd"	
+)
+env=$1
+
+if [[ $env == "" ]]; then 
+	echo "Usage: assume-role-helper <env>"
+	exit 1
+fi
+
+account=${aws_accounts[$env]}
+
+if [[ $account == "" ]]; then
+	echo "Couldn't find the realated AWS account"
+	exit 1
+fi
+
+#Print the assume-role alias
+echo "bitesize-aws-ar $account"

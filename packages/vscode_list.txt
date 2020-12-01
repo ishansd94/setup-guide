@@ -1,0 +1,15 @@
+christian-kohler.path-intellisense@2.2.1
+deerawan.vscode-dash@2.4.0
+esbenp.prettier-vscode@5.1.3
+fabiospampinato.vscode-open-in-finder@1.1.8
+golang.go@0.15.1
+hashicorp.terraform@2.0.2
+ms-azuretools.vscode-docker@1.3.1
+ms-kubernetes-tools.vscode-kubernetes-tools@1.2.1
+ms-python.python@2020.6.91350
+ms-vscode.cpptools@0.28.3
+redhat.vscode-yaml@0.8.0
+rust-lang.rust@0.7.8
+vscode-icons-team.vscode-icons@10.1.1
+vscoss.vscode-ansible@0.5.2
+yzhang.markdown-all-in-one@3.1.0
