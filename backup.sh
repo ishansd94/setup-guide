@@ -19,5 +19,3 @@ if [[ $git_status != ""  ]]; then
 fi  
 
 #TTest for auto backup
-
-
